@@ -27,8 +27,8 @@ Ranh gioi node:
 
 - `intake`: chuan hoa query dau vao.
 - `classify`: chon route bang keyword/state logic, khong hard-code scenario ID.
-- `tool`: mo phong tool lookup hoac tool execution.
-- `evaluate`: kiem tra ket qua tool va dat `evaluation_result`.
+- `tool`: mo phong tool lookup hoac tool execution, tra ve structured JSON payload.
+- `evaluate`: doc structured tool payload va dat `evaluation_result`.
 - `retry`: tang bien `attempt`, ghi loi, va gioi han vong lap bang `max_attempts`.
 - `risky_action`: tao hanh dong rui ro can duyet.
 - `approval`: buoc human-in-the-loop.
@@ -56,7 +56,7 @@ Approve/Reject cho reviewer.
 | `approval` | overwrite | Quyet dinh duyet moi nhat |
 | `evaluation_result` | overwrite | Cong dieu kien cho retry loop |
 | `messages` | append | Luu audit trail cua message |
-| `tool_results` | append | Luu ket qua tool qua cac lan goi |
+| `tool_results` | append | Luu ket qua tool dang JSON qua cac lan goi |
 | `errors` | append | Luu lich su loi/retry |
 | `events` | append | Audit event dung cho metrics va timeline UI |
 
@@ -98,8 +98,7 @@ Da chay cac lenh sau sau khi trien khai:
 python -m pytest
 ```
 
-Ket qua: `13 passed, 1 warning`. Warning den tu dependency LangGraph ve pending
-deprecation cua serializer, khong phai loi trong source cua lab.
+Ket qua: `17 passed`.
 
 ```bash
 python -m ruff check src tests
@@ -125,9 +124,10 @@ Ket qua: `Metrics valid. success_rate=100.00%`
 ## 6. Phan tich failure mode
 
 1. Loi tool/retry: cac ticket route `error` co the tao transient failure. Node
-   `evaluate` doc ket qua tool moi nhat; neu co loi thi dat `evaluation_result` thanh
-   `needs_retry`. Sau do `retry` tang `attempt`, ghi loi vao append-only `errors`, va
-   routing quyet dinh quay lai `tool` hay vao `dead_letter`.
+   `tool` tra structured JSON voi `status=error` va `data.retryable=true`. Node
+   `evaluate` doc ket qua tool moi nhat; neu loi retryable thi dat `evaluation_result`
+   thanh `needs_retry`. Sau do `retry` tang `attempt`, ghi loi vao append-only
+   `errors`, va routing quyet dinh quay lai `tool` hay vao `dead_letter`.
 
 2. Risky action khong duoc duyet: cac keyword nhu refund, delete, send, cancel, remove,
    revoke se route qua `risky_action` va `approval` truoc khi tool chay. Trong REST demo,

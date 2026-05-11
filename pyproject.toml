@@ -46,3 +46,4 @@ select = ["E", "F", "I", "B", "UP", "N", "ANN"]
 minversion = "8.0"
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
+pythonpath = ["src"]
