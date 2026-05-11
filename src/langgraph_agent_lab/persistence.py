@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+import sqlite3
+from importlib import import_module
+from typing import Any, cast
+
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 
-def build_checkpointer(kind: str = "memory", database_url: str | None = None) -> Any | None:
+def build_checkpointer(
+    kind: str = "memory",
+    database_url: str | None = None,
+) -> BaseCheckpointSaver[Any] | None:
     """Return a LangGraph checkpointer.
 
     TODO(student): add SQLite/Postgres support for the extension track.
@@ -19,14 +26,22 @@ def build_checkpointer(kind: str = "memory", database_url: str | None = None) ->
         return MemorySaver()
     if kind == "sqlite":
         try:
-            from langgraph.checkpoint.sqlite import SqliteSaver
+            sqlite_module = import_module("langgraph.checkpoint.sqlite")
         except ImportError as exc:
-            raise RuntimeError("SQLite checkpointer requires: pip install langgraph-checkpoint-sqlite") from exc
-        return SqliteSaver.from_conn_string(database_url or "checkpoints.db")
+            raise RuntimeError(
+                "SQLite checkpointer requires: pip install langgraph-checkpoint-sqlite"
+            ) from exc
+        conn = sqlite3.connect(database_url or "checkpoints.db", check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        sqlite_saver = sqlite_module.SqliteSaver(conn=conn)
+        return cast(BaseCheckpointSaver[Any], sqlite_saver)
     if kind == "postgres":
         try:
-            from langgraph.checkpoint.postgres import PostgresSaver
+            postgres_module = import_module("langgraph.checkpoint.postgres")
         except ImportError as exc:
-            raise RuntimeError("Postgres checkpointer requires: pip install langgraph-checkpoint-postgres") from exc
-        return PostgresSaver.from_conn_string(database_url or "")
+            raise RuntimeError(
+                "Postgres checkpointer requires: pip install langgraph-checkpoint-postgres"
+            ) from exc
+        postgres_saver = postgres_module.PostgresSaver.from_conn_string(database_url or "")
+        return cast(BaseCheckpointSaver[Any], postgres_saver)
     raise ValueError(f"Unknown checkpointer kind: {kind}")

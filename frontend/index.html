@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Support Ticket Agent</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <div class="header-row">
+          <div>
+            <p class="eyebrow">LangGraph Lab Demo</p>
+            <h1>Support Ticket Agent</h1>
+          </div>
+          <div id="statusPill" class="status-pill">Idle</div>
+        </div>
+
+        <form id="ticketForm" class="composer">
+          <label for="query">Ticket</label>
+          <textarea
+            id="query"
+            rows="4"
+            placeholder="Refund this customer and send confirmation email"
+          ></textarea>
+          <div class="composer-actions">
+            <button type="submit" class="primary">Run agent</button>
+            <button type="button" id="clearBtn" class="ghost">Reset</button>
+          </div>
+        </form>
+
+        <div class="samples" aria-label="Sample tickets">
+          <button data-query="How do I reset my password?">Simple</button>
+          <button data-query="Please lookup order status for order 12345">Tool lookup</button>
+          <button data-query="Can you fix it?">Missing info</button>
+          <button data-query="Refund this customer and send confirmation email">Refund HITL</button>
+          <button data-query="Delete customer account after support verification">Delete HITL</button>
+          <button data-query="Timeout failure while processing request">Retry</button>
+        </div>
+
+        <section id="approvalPanel" class="approval-panel hidden" aria-live="polite">
+          <div>
+            <p class="eyebrow">Human in the loop</p>
+            <h2>Approval required before the agent continues</h2>
+          </div>
+          <dl>
+            <div>
+              <dt>Risk</dt>
+              <dd id="approvalRisk">-</dd>
+            </div>
+            <div>
+              <dt>Proposed action</dt>
+              <dd id="approvalAction">-</dd>
+            </div>
+          </dl>
+          <label for="reviewComment">Reviewer comment</label>
+          <input id="reviewComment" type="text" placeholder="Looks safe to proceed" />
+          <div class="approval-actions">
+            <button id="approveBtn" class="primary" type="button">Approve</button>
+            <button id="rejectBtn" class="danger" type="button">Reject</button>
+          </div>
+        </section>
+
+        <section class="result-grid">
+          <article class="panel">
+            <div class="panel-heading">
+              <h2>Agent state</h2>
+              <span id="routeBadge" class="badge">route: -</span>
+            </div>
+            <div class="facts">
+              <div>
+                <span>Risk</span>
+                <strong id="riskValue">-</strong>
+              </div>
+              <div>
+                <span>Retries</span>
+                <strong id="retryValue">0</strong>
+              </div>
+              <div>
+                <span>Approval</span>
+                <strong id="approvalValue">-</strong>
+              </div>
+            </div>
+            <div class="answer-box">
+              <span>Final answer</span>
+              <p id="answerText">Run a ticket to inspect the agent output.</p>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <h2>Node timeline</h2>
+              <span id="nodeCount" class="badge">0 nodes</span>
+            </div>
+            <ol id="timeline" class="timeline"></ol>
+          </article>
+        </section>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
