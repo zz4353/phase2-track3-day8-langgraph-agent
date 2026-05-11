@@ -41,7 +41,7 @@ Các module quan trọng:
 | Path | Vai trò |
 |---|---|
 | `src/langgraph_agent_lab/state.py` | Typed state, route, scenario, append-only reducer |
-| `src/langgraph_agent_lab/nodes.py` | Node logic: classify, structured tool results, evaluate, approval, retry, answer |
+| `src/langgraph_agent_lab/nodes.py` | Node logic: classify, tool, evaluate, approval, retry, answer |
 | `src/langgraph_agent_lab/routing.py` | Conditional routing sau classify/evaluate/retry/approval |
 | `src/langgraph_agent_lab/graph.py` | Xây dựng LangGraph `StateGraph` |
 | `src/langgraph_agent_lab/metrics.py` | Metrics schema và hàm tổng hợp metrics |
@@ -84,7 +84,7 @@ python -m mypy src
 Kết quả đã kiểm tra gần nhất:
 
 ```text
-pytest: 17 passed
+pytest: 13 passed
 ruff: All checks passed!
 mypy: Success: no issues found in 11 source files
 ```

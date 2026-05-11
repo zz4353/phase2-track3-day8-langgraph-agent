@@ -6,7 +6,6 @@ input state in place.
 
 from __future__ import annotations
 
-import json
 import re
 
 from .state import AgentState, ApprovalDecision, Route, make_event
@@ -78,52 +77,15 @@ def tool_node(state: AgentState) -> dict:
     TODO(student): implement idempotent tool execution and structured tool results.
     """
     attempt = int(state.get("attempt", 0))
-    scenario_id = state.get("scenario_id", "unknown")
-    query = state.get("query", "")
-    route = state.get("route")
-
-    if route == Route.ERROR.value and attempt < 2:
-        result = {
-            "tool_name": "support_diagnostics",
-            "status": "error",
-            "message": f"Transient failure attempt={attempt}",
-            "data": {
-                "scenario_id": scenario_id,
-                "retryable": True,
-                "attempt": attempt,
-            },
-        }
-    elif route == Route.RISKY.value:
-        approval = state.get("approval") or {}
-        result = {
-            "tool_name": "risky_action_executor",
-            "status": "success" if approval.get("approved") else "blocked",
-            "message": "Risky action executed with approval context",
-            "data": {
-                "scenario_id": scenario_id,
-                "approved_by": approval.get("reviewer", "unknown"),
-                "action": "issue customer refund and send confirmation",
-            },
-        }
-    else:
-        order_matches = re.findall(r"\border\s+([A-Za-z0-9-]+)", query, re.IGNORECASE)
-        order_id = next(
-            (match for match in reversed(order_matches) if any(char.isdigit() for char in match)),
-            None,
+    if state.get("route") == Route.ERROR.value and attempt < 2:
+        result = (
+            f"ERROR: transient failure attempt={attempt} "
+            f"scenario={state.get('scenario_id', 'unknown')}"
         )
-        result = {
-            "tool_name": "order_lookup",
-            "status": "success",
-            "message": "Order lookup completed",
-            "data": {
-                "scenario_id": scenario_id,
-                "order_id": order_id or "unknown",
-                "order_status": "processing",
-                "eta": "2 business days",
-            },
-        }
+    else:
+        result = f"mock-tool-result for scenario={state.get('scenario_id', 'unknown')}"
     return {
-        "tool_results": [json.dumps(result)],
+        "tool_results": [result],
         "events": [make_event("tool", "completed", f"tool executed attempt={attempt}")],
     }
 
@@ -188,20 +150,7 @@ def answer_node(state: AgentState) -> dict:
     TODO(student): ground the answer in tool_results and approval where relevant.
     """
     if state.get("tool_results"):
-        latest = state["tool_results"][-1]
-        try:
-            payload = json.loads(latest)
-        except json.JSONDecodeError:
-            answer = f"I found: {latest}"
-        else:
-            data = payload.get("data", {})
-            if payload.get("tool_name") == "order_lookup" and payload.get("status") == "success":
-                answer = (
-                    f"Order {data.get('order_id')} is {data.get('order_status')} "
-                    f"with ETA {data.get('eta')}."
-                )
-            else:
-                answer = payload.get("message", f"I found: {latest}")
+        answer = f"I found: {state['tool_results'][-1]}"
     else:
         answer = "This is a safe mock answer. Replace with your agent response."
     return {
@@ -217,15 +166,7 @@ def evaluate_node(state: AgentState) -> dict:
     """
     tool_results = state.get("tool_results", [])
     latest = tool_results[-1] if tool_results else ""
-    try:
-        payload = json.loads(latest)
-    except json.JSONDecodeError:
-        needs_retry = "ERROR" in latest
-    else:
-        needs_retry = payload.get("status") == "error" and bool(
-            payload.get("data", {}).get("retryable")
-        )
-    if needs_retry:
+    if "ERROR" in latest:
         return {
             "evaluation_result": "needs_retry",
             "events": [
