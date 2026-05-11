@@ -1,210 +1,207 @@
-# Day 08 Lab — LangGraph Agentic Orchestration
+# Day 08 Lab - LangGraph Agentic Orchestration
 
-Build a production-style LangGraph workflow for a support-ticket agent with state management, conditional routing, retry loops, human-in-the-loop approval, persistence, and metrics.
+Đây là bài lab xây dựng một **support-ticket agent** bằng LangGraph. Agent có thể phân
+loại ticket hỗ trợ khách hàng, gọi mock tool khi cần, retry khi gặp lỗi tạm thời, đưa
+các hành động rủi ro qua bước human-in-the-loop approval, và xuất metrics/report để phục
+vụ chấm điểm.
 
-This is a **starter skeleton**. Core logic is left as `TODO(student)` — implement your own design.
+Repo cũng có thêm REST API bằng FastAPI và frontend tĩnh để demo rõ luồng
+human-in-the-loop trên trình duyệt.
 
----
+## What This Lab Demonstrates
 
-## How you will be graded
+Agent hỗ trợ năm route chính:
 
-| Category | Points | What we look for |
-|---|---:|---|
-| Architecture & state schema | 20 | Typed state with correct reducers, lean serializable fields, clear node boundaries |
-| Graph behavior | 25 | All scenario routes correct, bounded retry loop, HITL approval path, all routes terminate |
-| Persistence & recovery | 15 | Checkpointer wired, thread_id per run, state history or crash-resume evidence |
-| Metrics & tests | 20 | `metrics.json` valid, scenario coverage, tests pass, meaningful counts |
-| Report & demo | 15 | Architecture explanation, metrics table, failure analysis, improvement ideas |
-| Production hygiene | 5 | Config, environment handling, lint/type discipline |
+| Route | Mục đích | Ví dụ |
+|---|---|---|
+| `simple` | Trả lời câu hỏi hỗ trợ đơn giản, an toàn | `How do I reset my password?` |
+| `tool` | Gọi mock lookup tool | `Please lookup order status for order 12345` |
+| `missing_info` | Hỏi thêm thông tin thay vì đoán | `Can you fix it?` |
+| `risky` | Bắt buộc có người duyệt trước khi tiếp tục | `Refund this customer and send confirmation email` |
+| `error` | Retry lỗi tạm thời, hết lượt thì dead-letter | `Timeout failure while processing request` |
 
-**Grade bands:**
-- **90–100**: Production-quality graph + metrics + report + at least one bonus extension
-- **75–89**: Core graph works, metrics valid, report explains trade-offs
-- **60–74**: Graph mostly works but persistence/report/error handling incomplete
-- **< 60**: Does not run, hard-codes scenarios, or lacks metrics/report
+Chủ đề của bài là support-ticket agent nói chung. Refund/delete/send chỉ là các ví dụ
+về hành động rủi ro để minh họa human-in-the-loop.
 
-> **Critical rule**: Do NOT hard-code answers to specific scenario queries. Your graph must route based on **keywords and state logic**, not by matching exact scenario IDs. We grade with additional hidden scenarios that test the same routing rules but use different queries.
+## Architecture
 
----
+Luồng LangGraph chính:
 
-## Understanding `scenarios.jsonl`
-
-The file `data/sample/scenarios.jsonl` contains **7 sample scenarios** your graph must handle:
-
-```jsonl
-{"id":"S01_simple",      "query":"How do I reset my password?",                          "expected_route":"simple"}
-{"id":"S02_tool",        "query":"Please lookup order status for order 12345",            "expected_route":"tool"}
-{"id":"S03_missing",     "query":"Can you fix it?",                                      "expected_route":"missing_info"}
-{"id":"S04_risky",       "query":"Refund this customer and send confirmation email",      "expected_route":"risky"}
-{"id":"S05_error",       "query":"Timeout failure while processing request",              "expected_route":"error"}
-{"id":"S06_delete",      "query":"Delete customer account after support verification",    "expected_route":"risky"}
-{"id":"S07_dead_letter", "query":"System failure cannot recover after multiple attempts", "expected_route":"error", "max_attempts":1}
+```text
+START -> intake -> classify
+simple       -> answer -> finalize -> END
+tool         -> tool -> evaluate -> answer -> finalize -> END
+missing_info -> clarify -> finalize -> END
+risky        -> risky_action -> approval -> tool -> evaluate -> answer -> finalize -> END
+error        -> retry -> tool -> evaluate -> retry/tool or dead_letter -> finalize -> END
 ```
 
-### What each field means
+Các module quan trọng:
 
-| Field | Purpose |
+| Path | Vai trò |
 |---|---|
-| `id` | Unique scenario identifier — used in metrics output |
-| `query` | The user's support-ticket text — input to your graph |
-| `expected_route` | Which route your `classify_node` should pick: `simple`, `tool`, `missing_info`, `risky`, or `error` |
-| `requires_approval` | If `true`, your graph must hit the approval/HITL node before answering |
-| `should_retry` | If `true`, scenario simulates transient tool failure requiring retry |
-| `max_attempts` | Override retry limit (default 3). S07 sets this to 1, so it exhausts retries immediately → dead letter |
-| `tags` | Descriptive labels for your reference |
+| `src/langgraph_agent_lab/state.py` | Typed state, route, scenario, append-only reducer |
+| `src/langgraph_agent_lab/nodes.py` | Node logic: classify, tool, evaluate, approval, retry, answer |
+| `src/langgraph_agent_lab/routing.py` | Conditional routing sau classify/evaluate/retry/approval |
+| `src/langgraph_agent_lab/graph.py` | Xây dựng LangGraph `StateGraph` |
+| `src/langgraph_agent_lab/metrics.py` | Metrics schema và hàm tổng hợp metrics |
+| `src/langgraph_agent_lab/persistence.py` | Memory và SQLite/Postgres checkpointer adapter |
+| `src/langgraph_agent_lab/cli.py` | CLI chạy scenario và validate metrics |
+| `src/langgraph_agent_lab/api.py` | FastAPI REST API cho demo browser |
+| `frontend/` | UI tĩnh để demo support-ticket agent và HITL |
 
-### How scenarios flow through your code
+## Setup
 
+Yêu cầu Python 3.11+.
+
+Ví dụ dùng conda:
+
+```bat
+conda create -n day82 python=3.11 -y
+conda activate day82
+pip install -e .[dev]
 ```
-scenarios.jsonl  →  scenarios.py loads them  →  cli.py runs each through your graph
-                                              →  metrics.py collects results
-                                              →  outputs/metrics.json
+
+Trên Windows/cmd, dùng:
+
+```bat
+pip install -e .[dev]
 ```
 
-1. `make run-scenarios` reads `data/sample/scenarios.jsonl`
-2. For each scenario, it calls `initial_state(scenario)` → `graph.invoke(state)`
-3. After execution, it checks: did `actual_route` match `expected_route`? Did HITL fire when required?
-4. Results go to `outputs/metrics.json`
+Không dùng dấu nháy đơn kiểu `pip install -e '.[dev]'` trong Windows cmd, vì pip sẽ
+nhận sai requirement.
 
-### How to design your routing logic
+## Run Quality Checks
 
-Your `classify_node` should use **keyword-based heuristics** to pick routes:
+Chạy các lệnh kiểm tra:
 
-| Route | Trigger keywords (examples) |
+```bat
+python -m pytest
+python -m ruff check src tests
+python -m mypy src
+```
+
+Kết quả đã kiểm tra gần nhất:
+
+```text
+pytest: 13 passed, 1 warning
+ruff: All checks passed!
+mypy: Success: no issues found in 11 source files
+```
+
+Warning của pytest đến từ dependency LangGraph về serializer deprecation, không phải lỗi
+trong source code của project.
+
+## Run Scenarios And Metrics
+
+Chạy toàn bộ scenario mẫu và sinh metrics:
+
+```bat
+python -m langgraph_agent_lab.cli run-scenarios --config configs/lab.yaml --output outputs/metrics.json
+python -m langgraph_agent_lab.cli validate-metrics --metrics outputs/metrics.json
+```
+
+Kết quả kỳ vọng:
+
+```text
+Wrote metrics to outputs\metrics.json
+Metrics valid. success_rate=100.00%
+```
+
+Khi chạy scenarios, project cũng sinh lại report:
+
+```text
+reports/lab_report.md
+```
+
+Report được viết bằng tiếng Việt và bao gồm kiến trúc, state schema, metrics theo
+scenario, kết quả test thật, phân tích failure mode, persistence evidence, và hướng dẫn
+demo UI/HITL.
+
+## Run The Frontend HITL Demo
+
+Khởi động REST API và static frontend:
+
+```bat
+python -m uvicorn langgraph_agent_lab.api:app --reload --host 127.0.0.1 --port 8000
+```
+
+Sau đó mở:
+
+```text
+http://127.0.0.1:8000/app/
+```
+
+Luồng demo:
+
+1. Chọn sample `Refund HITL` hoặc `Delete HITL`.
+2. Bấm `Run agent`.
+3. Agent dừng ở trạng thái `awaiting approval`.
+4. UI hiển thị route, node timeline, risk level, proposed action, và nút Approve/Reject.
+5. Bấm `Approve` để workflow chạy tiếp qua `approval -> tool -> evaluate -> answer -> finalize`.
+6. Bấm `Reject` để workflow chuyển sang clarification thay vì thực hiện tool action.
+
+Các REST endpoint:
+
+| Method | Path | Mục đích |
+|---|---|---|
+| `GET` | `/api/health` | Health check |
+| `POST` | `/api/runs` | Tạo một ticket run |
+| `GET` | `/api/runs/{run_id}` | Xem trạng thái run |
+| `POST` | `/api/runs/{run_id}/approval` | Gửi quyết định approve/reject |
+
+## Make Commands
+
+Nếu máy có `make`, có thể dùng các lệnh sau:
+
+| Command | Chức năng |
 |---|---|
-| `risky` | refund, delete, send, cancel, remove, revoke |
-| `tool` | status, order, lookup, check, track, find, search |
-| `missing_info` | Very short/vague queries (e.g., < 5 words with pronouns like "it") |
-| `error` | timeout, fail, error, crash, unavailable |
-| `simple` | Default — anything that doesn't match above |
+| `make install` | Cài project và dev dependencies |
+| `make test` | Chạy pytest |
+| `make lint` | Chạy ruff |
+| `make typecheck` | Chạy mypy |
+| `make run-scenarios` | Sinh `outputs/metrics.json` và report |
+| `make grade-local` | Validate metrics schema |
+| `make serve` | Chạy FastAPI + frontend tại `127.0.0.1:8000` |
+| `make clean` | Xóa cache/artifact sinh ra |
 
-**Priority matters**: check risky keywords first (highest priority), then tool, then missing_info, then error, then default to simple. This prevents conflicts when a query contains keywords from multiple categories.
+Trên Windows, các lệnh `python -m ...` ở trên thường ổn định hơn.
 
-### Adding your own test scenarios
+## Sample Scenarios
 
-You can add extra lines to `scenarios.jsonl` to test edge cases:
+`data/sample/scenarios.jsonl` có bảy scenario mẫu:
 
-```jsonl
-{"id":"S08_custom","query":"Cancel my subscription immediately","expected_route":"risky","requires_approval":true,"tags":["custom"]}
+| Scenario | Expected route | Ghi chú |
+|---|---|---|
+| `S01_simple` | `simple` | Hỏi cách reset password |
+| `S02_tool` | `tool` | Lookup order |
+| `S03_missing` | `missing_info` | Câu hỏi mơ hồ, thiếu thông tin |
+| `S04_risky` | `risky` | Refund/send, cần approval |
+| `S05_error` | `error` | Retry path |
+| `S06_delete` | `risky` | Delete account, cần approval |
+| `S07_dead_letter` | `error` | Hết retry với `max_attempts=1` |
+
+## Submission Notes
+
+`outputs/metrics.json` và `reports/lab_report.md` đang bị `.gitignore` ignore vì đây là
+generated artifacts. Nếu yêu cầu nộp các file này qua git, cần add cưỡng bức:
+
+```bat
+git add -f outputs/metrics.json reports/lab_report.md
 ```
 
-This helps you verify your routing handles cases beyond the 7 samples. The grading script will also test with scenarios you haven't seen.
+Trước khi nộp/demo, nên chạy lại:
 
----
-
-## Quick start
-
-```bash
-# Option A: conda
-conda activate ai-lab
-pip install -e '.[dev]'
-
-# Option B: venv
-python -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-
-# Verify setup
-make test
+```bat
+python -m pytest
+python -m ruff check src tests
+python -m mypy src
+python -m langgraph_agent_lab.cli run-scenarios --config configs/lab.yaml --output outputs/metrics.json
+python -m langgraph_agent_lab.cli validate-metrics --metrics outputs/metrics.json
 ```
 
-`pip install -e '.[dev]'` installs this project in editable mode with dev dependencies (pytest, ruff, mypy). Editable mode means code changes take effect immediately without reinstalling.
+Sau đó demo HITL UI tại:
 
----
-
-## Step-by-step workflow
-
-### Phase 1: Core graph (0–75 min) — worth 45 points
-
-1. **`state.py`** — Confirm which fields use `Annotated[list, add]` (append-only reducer). Add `evaluation_result` field for retry loop gate.
-
-2. **`nodes.py`** — Implement each node function. Key ones:
-   - `classify_node`: keyword-based routing (see table above)
-   - `evaluate_node`: check tool results for errors → set `evaluation_result` to `"needs_retry"` or `"success"`
-   - `dead_letter_node`: log failures when max retries exceeded
-   - `approval_node`: mock approval (return `approved=True` by default)
-
-3. **`routing.py`** — Implement routing functions:
-   - `route_after_classify`: map route string → next node name
-   - `route_after_evaluate`: if `needs_retry` → `"retry"`, else → `"answer"`
-   - `route_after_retry`: if `attempt < max_attempts` → back to tool, else → `"dead_letter"`
-
-4. **`graph.py`** — Wire nodes and edges. Target architecture:
-
-   ```
-   START → intake → classify → [conditional routing]
-     simple       → answer → finalize → END
-     tool         → tool → evaluate → answer → finalize → END
-     missing_info → clarify → finalize → END
-     risky        → risky_action → approval → tool → evaluate → answer → finalize → END
-     error        → retry → tool → evaluate → [retry loop or answer]
-     max retry    → dead_letter → finalize → END
-   ```
-
-5. **Verify**: `make test` and `make run-scenarios`
-
-### Phase 2: Persistence (75–120 min) — worth 15 points
-
-6. **`persistence.py`** — Implement checkpointer factory:
-   - `"memory"` → `MemorySaver()` (already works for dev)
-   - `"sqlite"` → `SqliteSaver` with `sqlite3.connect()` and WAL mode
-   - Show evidence: thread_id per run, state history, or crash-resume
-
-### Phase 3: Metrics & report (120–180 min) — worth 35 points
-
-7. **Run all scenarios**: `make run-scenarios` → generates `outputs/metrics.json`
-8. **Validate**: `make grade-local` → checks metrics schema
-9. **Write report**: Fill `reports/lab_report.md` — explain architecture, metrics, failures, improvements
-
-### Phase 4: Bonus extensions (180+ min) — push toward 90+
-
-Pick one or more:
-- **Parallel fan-out**: Use `Send()` to run two tools concurrently, merge results via `add` reducer
-- **Real HITL**: Set `LANGGRAPH_INTERRUPT=true`, use `interrupt()` in approval_node
-- **Streamlit UI**: Build approval/reject interface with interrupt/resume
-- **Time travel**: Use `get_state_history()` to replay from earlier checkpoint
-- **Crash recovery**: Show SQLite checkpoint survives process kill + restart
-- **Graph diagram**: Export Mermaid diagram via `graph.get_graph().draw_mermaid()`
-
----
-
-## Make commands
-
-| Command | What it does |
-|---|---|
-| `make install` | Install project + dev dependencies |
-| `make test` | Run pytest |
-| `make lint` | Run ruff linter |
-| `make typecheck` | Run mypy type checker |
-| `make run-scenarios` | Execute all scenarios → `outputs/metrics.json` |
-| `make grade-local` | Validate metrics.json schema |
-| `make clean` | Remove caches and generated files |
-
----
-
-## Submission checklist
-
-- [ ] All `TODO(student)` sections completed
-- [ ] `make test` passes
-- [ ] `make run-scenarios` generates valid `outputs/metrics.json`
-- [ ] `make grade-local` passes validation
-- [ ] `reports/lab_report.md` filled in with architecture explanation, metrics analysis, and improvement ideas
-- [ ] Can explain at least one route and one failure mode during demo
-
-**For 90+ points, also include:**
-- [ ] At least one bonus extension (persistence, parallel fan-out, HITL, time travel, diagram)
-- [ ] Evidence of extension in report (screenshot, log output, or diagram)
-
----
-
-## Common pitfalls
-
-1. **Keyword conflicts**: "Check order status" contains both "check" (tool) and "order" (tool). Test priority carefully — risky keywords should take precedence over tool keywords.
-
-2. **Word boundary matching**: "Can you fix it?" — match "it" as a whole word, not as substring of "item" or "iteration". Strip punctuation before checking.
-
-3. **Unbounded retry**: Always check `attempt < max_attempts`. Without this bound, error scenarios loop forever.
-
-4. **SqliteSaver API**: In `langgraph-checkpoint-sqlite` 3.x, use `SqliteSaver(conn=sqlite3.connect(...))` not `SqliteSaver.from_conn_string()` (returns context manager, not checkpointer).
-
-5. **Forgetting finalize**: Every route must end at `finalize → END`. Missing this means the graph never terminates for some scenarios.
+```text
+http://127.0.0.1:8000/app/
+```
